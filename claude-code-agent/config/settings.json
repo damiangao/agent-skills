@@ -1,0 +1,11 @@
+{
+  "api_base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+  "model": "kimi-k2.5",
+  "feishu_chat_id": "user:ou_8f725769032066e49523f31b501e33c6",
+  "result_dir": "/home/ubuntu/clawd/data/claude-code-results",
+  "hook_script": "/root/.claude/hooks/notify-agi.sh",
+  "agent_teams": {
+    "enabled": true,
+    "teammate_mode": "auto"
+  }
+}
