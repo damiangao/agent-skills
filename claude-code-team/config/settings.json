@@ -5,7 +5,7 @@
   "notify": {
     "channels": ["feishu"],
     "feishu": {
-      "chat_id": "user:ou_8f725769032066e49523f31b501e33c6"
+      "chat_id": "user:ou_xxxxxx"
     },
     "discord": {
       "webhook_url": "",
