@@ -251,10 +251,10 @@ Results saved to configured `result_dir` (default: `~/.openclaw/data/claude-code
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `ANTHROPIC_API_KEY` | API Key for Claude | ✅ Yes |
-| `ANTHROPIC_BASE_URL` | Custom API base URL | ❌ No |
-| `ANTHROPIC_MODEL` | Model to use | ❌ No |
-| `OPENCLAW_GATEWAY_TOKEN` | Gateway token for wake API | ❌ No |
+| `ANTHROPIC_API_KEY` | API Key for Claude | Yes |
+| `ANTHROPIC_BASE_URL` | Custom API base URL | No |
+| `ANTHROPIC_MODEL` | Model to use | No |
+| `OPENCLAW_GATEWAY_TOKEN` | Gateway token for wake API | No |
 
 ### Config File Options
 
@@ -316,6 +316,7 @@ scripts/install-hooks.sh install
 ```
 claude-code-team/
 ├── SKILL.md                    # This documentation
+├── README.md                   # Extended documentation
 ├── config/
 │   └── settings.json           # Configuration file
 ├── lib/

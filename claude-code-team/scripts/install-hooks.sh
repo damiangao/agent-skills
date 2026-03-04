@@ -1,12 +1,13 @@
 #!/bin/bash
-# Claude Code Team - Hook 安装脚本
-# 安装/卸载通知 Hook 到 Claude Code hooks 目录
+# Claude Code Team - Hook Installation Script
+# Install/uninstall notification hooks to Claude Code hooks directory
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CCT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 HOOKS_DIR="${HOME}/.claude/hooks"
 NOTIFY_HOOK="${HOOKS_DIR}/notify-agi.sh"
 
-# 颜色定义
+# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -24,176 +25,190 @@ error() {
     echo -e "${RED}✗${NC} $1"
 }
 
-# ============ 创建 Hook 脚本 ============
+# ============ Create Hook Script ============
 create_hook() {
     mkdir -p "$HOOKS_DIR"
 
-    cat > "$NOTIFY_HOOK" << 'HOOKEOF'
+    cat > "$NOTIFY_HOOK" << HOOKEOF
 #!/bin/bash
-# Claude Code Team - 通知 Hook
-# 由 Claude Code Agent Teams 触发
+# Claude Code Team - Notification Hook
+# Triggered by Claude Code Agent Teams
 
-HOOKS_DIR="${HOME}/.claude/hooks"
-CCT_DIR="${HOME}/.openclaw/workspace/skills/claude-code-team"
-LIB_DIR="${CCT_DIR}/lib"
+HOOKS_DIR="\${HOME}/.claude/hooks"
+CCT_DIR="${CCT_DIR}"
+LIB_DIR="\${CCT_DIR}/lib"
 
-# 解析传入的 JSON 数据
+# Parse incoming JSON data
 read -r JSON_DATA
 
-# 提取字段
-SESSION_ID=$(echo "$JSON_DATA" | jq -r '.session_id // empty')
-EVENT_NAME=$(echo "$JSON_DATA" | jq -r '.hook_event_name // empty')
-CWD=$(echo "$JSON_DATA" | jq -r '.cwd // empty')
+# Extract fields
+SESSION_ID=\$(echo "\$JSON_DATA" | jq -r '.session_id // empty')
+EVENT_NAME=\$(echo "\$JSON_DATA" | jq -r '.hook_event_name // empty')
+CWD=\$(echo "\$JSON_DATA" | jq -r '.cwd // empty')
 
-# 检查是否为 Agent Teams 任务
-if [ -z "$SESSION_ID" ] || [[ ! "$SESSION_ID" =~ ^session- ]]; then
+# Check if this is an Agent Teams task
+if [ -z "\$SESSION_ID" ] || [[ ! "\$SESSION_ID" =~ ^session- ]]; then
     exit 0
 fi
 
-# 加载配置模块和通知模块
-source "${LIB_DIR}/config.sh" 2>/dev/null
-source "${LIB_DIR}/notify.sh" 2>/dev/null
+# Load configuration and notification modules
+source "\${LIB_DIR}/config.sh" 2>/dev/null
+source "\${LIB_DIR}/notify.sh" 2>/dev/null
 
-# 导出配置
+# Export configuration
 export_config
 
-# 读取任务元数据
-RESULT_DIR="${CCT_RESULT_DIR:-/root/.openclaw/data/claude-code-results}"
-META_FILE="${RESULT_DIR}/task-meta.json"
-OUTPUT_FILE="${RESULT_DIR}/task-output.txt"
+# Read task metadata
+RESULT_DIR="\${CCT_RESULT_DIR:-/root/.openclaw/data/claude-code-results}"
+META_FILE="\${RESULT_DIR}/task-meta.json"
+OUTPUT_FILE="\${RESULT_DIR}/task-output.txt"
 
-if [ ! -f "$META_FILE" ]; then
+if [ ! -f "\$META_FILE" ]; then
     exit 0
 fi
 
-TASK_PROMPT=$(jq -r '.prompt // "未知任务"' "$META_FILE" 2>/dev/null)
-EXIT_CODE=$(jq -r '.exit_code // -1' "$META_FILE" 2>/dev/null)
+TASK_PROMPT=\$(jq -r '.prompt // "Unknown task"' "\$META_FILE" 2>/dev/null)
+EXIT_CODE=\$(jq -r '.exit_code // -1' "\$META_FILE" 2>/dev/null)
 
-# 确定状态
-if [ "$EXIT_CODE" = "0" ]; then
-    STATUS="✅ 成功"
+# Determine status
+if [ "\$EXIT_CODE" = "0" ]; then
+    STATUS="Success"
 else
-    STATUS="❌ 失败"
+    STATUS="Failed"
 fi
 
-# 生成摘要
+# Generate summary
 OUTPUT_PREVIEW=""
-if [ -f "$OUTPUT_FILE" ] && [ -s "$OUTPUT_FILE" ]; then
-    OUTPUT_PREVIEW=$(tail -n 50 "$OUTPUT_FILE" | head -n 20 | sed 's/"/\\"/g' | tr '\n' ' ')
-    if [ ${#OUTPUT_PREVIEW} -gt 800 ]; then
-        OUTPUT_PREVIEW="${OUTPUT_PREVIEW:0:800}..."
+if [ -f "\$OUTPUT_FILE" ] && [ -s "\$OUTPUT_FILE" ]; then
+    OUTPUT_PREVIEW=\$(tail -n 50 "\$OUTPUT_FILE" | head -n 20 | sed 's/"/\\"/g' | tr '\n' ' ')
+    if [ \${#OUTPUT_PREVIEW} -gt 800 ]; then
+        OUTPUT_PREVIEW="\${OUTPUT_PREVIEW:0:800}..."
     fi
 fi
 
-# 构建通知消息
-MSG="🤖 Claude Code 任务完成
+# Build notification message
+MSG="🤖 Claude Code Task Completed
 
-${STATUS}
+\${STATUS}
 
-📝 任务：${TASK_PROMPT}
-🔑 Session: ${SESSION_ID}
-📁 目录: ${CWD}
+📝 Task: \${TASK_PROMPT}
+🔑 Session: \${SESSION_ID}
+📁 Directory: \${CWD}
 
-📋 输出摘要：
+📋 Output Summary:
 \`\`\`
-${OUTPUT_PREVIEW}
+\${OUTPUT_PREVIEW}
 \`\`\`
 
-⏰ $(date '+%Y-%m-%d %H:%M:%S')"
+⏰ \$(date '+%Y-%m-%d %H:%M:%S')"
 
-# 发送通知到所有配置的渠道
-send_notification "$MSG"
+# Send notification to all configured channels
+send_notification "\$MSG"
 
-# 写入唤醒标记
-if [ -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
-    cat > "${RESULT_DIR}/pending-wake.json" << EOF
+# Write wake marker
+if [ -n "\${OPENCLAW_GATEWAY_TOKEN:-}" ]; then
+    cat > "\${RESULT_DIR}/pending-wake.json" << WAKEEOF
 {
-  "session_id": "${SESSION_ID}",
-  "timestamp": "$(date -Iseconds)",
+  "session_id": "\${SESSION_ID}",
+  "timestamp": "\$(date -Iseconds)",
   "event": "task_completed",
-  "status": "$STATUS"
+  "status": "\${STATUS}"
 }
-EOF
-    # 触发网关唤醒
-    curl -s -X POST "https://gateway.openclaw.local/wake" \
-        -H "Authorization: Bearer ${OPENCLAW_GATEWAY_TOKEN}" \
-        -H "Content-Type: application/json" \
-        -d "{\"session_id\":\"${SESSION_ID}\"}" > /dev/null 2>&1 || true
+WAKEEOF
+    # Trigger gateway wake (with timeout)
+    curl -s -X POST "https://gateway.openclaw.local/wake" \\
+        -H "Authorization: Bearer \${OPENCLAW_GATEWAY_TOKEN}" \\
+        -H "Content-Type: application/json" \\
+        -d "{\"session_id\":\"\${SESSION_ID}\"}" --max-time 10 > /dev/null 2>&1 || true
 fi
 HOOKEOF
 
     chmod +x "$NOTIFY_HOOK"
-    info "已创建通知 Hook: $NOTIFY_HOOK"
+    info "Created notification hook: $NOTIFY_HOOK"
 }
 
-# ============ 卸载 Hook ============
+# ============ Uninstall Hook ============
 remove_hook() {
     if [ -f "$NOTIFY_HOOK" ]; then
         rm -f "$NOTIFY_HOOK"
-        info "已移除通知 Hook"
+        info "Removed notification hook"
     else
-        warn "Hook 不存在: $NOTIFY_HOOK"
+        warn "Hook does not exist: $NOTIFY_HOOK"
     fi
 }
 
-# ============ 检查 Hook 状态 ============
+# ============ Check Hook Status ============
 check_status() {
-    echo "=== Hook 状态检查 ==="
+    echo "=== Hook Status Check ==="
     echo ""
 
     if [ -f "$NOTIFY_HOOK" ]; then
-        info "通知 Hook 已安装"
-        echo "  路径: $NOTIFY_HOOK"
+        info "Notification hook is installed"
+        echo "  Path: $NOTIFY_HOOK"
         if [ -x "$NOTIFY_HOOK" ]; then
-            info "可执行权限: 已设置"
+            info "Execute permission: Set"
         else
-            warn "可执行权限: 未设置"
+            warn "Execute permission: Not set"
         fi
     else
-        warn "通知 Hook 未安装"
+        warn "Notification hook is not installed"
     fi
 
     echo ""
-    echo "=== Claude Code Hooks 目录 ==="
-    echo "  路径: $HOOKS_DIR"
+    echo "=== Claude Code Hooks Directory ==="
+    echo "  Path: $HOOKS_DIR"
 
     if [ -d "$HOOKS_DIR" ]; then
-        info "目录存在"
+        info "Directory exists"
         echo ""
-        echo "现有 Hooks:"
-        ls -la "$HOOKS_DIR"/*.sh 2>/dev/null || echo "  (无)"
+        echo "Installed Hooks:"
+        ls -la "$HOOKS_DIR"/*.sh 2>/dev/null || echo "  (none)"
     else
-        warn "目录不存在"
+        warn "Directory does not exist"
     fi
 }
 
-# ============ 主程序 ============
-case "${1:-install}" in
-    install)
-        echo "=== 安装 Claude Code Team Hooks ==="
-        echo ""
+# ============ Update Claude Settings ============
+update_claude_settings() {
+    local claude_settings="${HOME}/.claude/settings.json"
+    local claude_dir="${HOME}/.claude"
 
-        # 检查依赖
-        if ! command -v jq &> /dev/null; then
-            error "jq 未安装"
-            exit 1
-        fi
+    mkdir -p "$claude_dir"
 
-        create_hook
+    # Check if settings.json exists and merge settings
+    if [ -f "$claude_settings" ]; then
+        # Backup existing settings
+        cp "$claude_settings" "${claude_settings}.bak"
 
-        # 配置 Claude settings.json
-        echo ""
-        echo "正在配置 Claude hooks..."
-        cat > "${HOME}/.claude/settings.json" << 'SETTINGSEOF'
+        # Update hooks configuration using jq
+        local tmp_file=$(mktemp)
+        jq '.hooks.Stop = [
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "'"${NOTIFY_HOOK}"'",
+                        "timeout": 30
+                    }
+                ]
+            }
+        ]' "$claude_settings" > "$tmp_file" 2>/dev/null
+
+        if [ $? -eq 0 ]; then
+            mv "$tmp_file" "$claude_settings"
+        else
+            rm -f "$tmp_file"
+            # Fallback: create new settings
+            cat > "$claude_settings" << SETTINGSEOF
 {
-  "model": "kimi-k2.5",
+  "model": "claude-sonnet-4-6",
   "hooks": {
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "/root/.claude/hooks/notify-agi.sh",
+            "command": "${NOTIFY_HOOK}",
             "timeout": 30
           }
         ]
@@ -203,20 +218,61 @@ case "${1:-install}" in
   }
 }
 SETTINGSEOF
-        info "已更新 ~/.claude/settings.json"
+        fi
+    else
+        # Create new settings file
+        cat > "$claude_settings" << SETTINGSEOF
+{
+  "model": "claude-sonnet-4-6",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${NOTIFY_HOOK}",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SessionEnd": []
+  }
+}
+SETTINGSEOF
+    fi
+
+    info "Updated Claude settings: $claude_settings"
+}
+
+# ============ Main Program ============
+case "${1:-install}" in
+    install)
+        echo "=== Installing Claude Code Team Hooks ==="
+        echo ""
+
+        # Check dependencies
+        if ! command -v jq &> /dev/null; then
+            error "jq is not installed"
+            echo "  Install: apt-get install jq OR brew install jq"
+            exit 1
+        fi
+
+        create_hook
+        update_claude_settings
 
         echo ""
-        info "安装完成！"
+        info "Installation complete!"
         echo ""
-        echo "Hook 功能："
-        echo "  - 任务开始时发送通知"
-        echo "  - 任务完成后发送通知（含输出摘要）"
-        echo "  - 支持多通知渠道（Feishu/Discord/Telegram）"
-        echo "  - 自动触发网关唤醒（如果配置了 TOKEN）"
+        echo "Hook features:"
+        echo "  - Send notification when task starts"
+        echo "  - Send notification when task completes (with output summary)"
+        echo "  - Support multiple notification channels (Feishu/Discord/Telegram)"
+        echo "  - Auto trigger gateway wake (if TOKEN is configured)"
         ;;
 
     remove|uninstall)
-        echo "=== 卸载 Claude Code Team Hooks ==="
+        echo "=== Uninstalling Claude Code Team Hooks ==="
         echo ""
         remove_hook
         ;;
@@ -226,11 +282,11 @@ SETTINGSEOF
         ;;
 
     *)
-        echo "用法: $0 {install|remove|status}"
+        echo "Usage: $0 {install|remove|status}"
         echo ""
-        echo "命令:"
-        echo "  install   安装/更新 Hook（默认）"
-        echo "  remove    卸载 Hook"
-        echo "  status    检查 Hook 状态"
+        echo "Commands:"
+        echo "  install   Install/update hook (default)"
+        echo "  remove    Uninstall hook"
+        echo "  status    Check hook status"
         ;;
 esac

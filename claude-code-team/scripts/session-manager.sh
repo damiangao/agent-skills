@@ -1,28 +1,34 @@
 #!/bin/bash
-# Session 管理器 - 维护项目目录与 Session ID 的映射
-# 用法：
-#   session-manager.sh get /path/to/project    # 获取 session_id
-#   session-manager.sh set /path/to/project    # 创建/更新 session_id
-#   session-manager.sh list                    # 列出所有映射
-#   session-manager.sh remove /path/to/project # 删除映射
+# Session Manager - Maintains mapping between project directories and Session IDs
+# Usage:
+#   session-manager.sh get /path/to/project    # Get session_id
+#   session-manager.sh set /path/to/project    # Create/update session_id
+#   session-manager.sh list                    # List all mappings
+#   session-manager.sh remove /path/to/project # Remove mapping
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DATA_DIR="${SCRIPT_DIR}/../data"
 SESSIONS_FILE="${DATA_DIR}/sessions.json"
 
-# 确保数据目录存在
+# Ensure data directory exists
 mkdir -p "$DATA_DIR"
 
-# 初始化 sessions.json（如果不存在）
+# Initialize sessions.json (if not exists)
 if [ ! -f "$SESSIONS_FILE" ]; then
     echo '{}' > "$SESSIONS_FILE"
 fi
 
-# 获取 session_id
+# Get session_id
 get_session() {
     local workdir="$1"
+
+    if [ -z "$workdir" ]; then
+        echo "Error: Working directory is required" >&2
+        return 1
+    fi
+
     local session_id=$(jq -r --arg dir "$workdir" '.[$dir] // empty' "$SESSIONS_FILE" 2>/dev/null)
-    
+
     if [ -n "$session_id" ]; then
         echo "$session_id"
     else
@@ -30,12 +36,17 @@ get_session() {
     fi
 }
 
-# 创建或获取 session_id
+# Create or get session_id
 set_session() {
     local workdir="$1"
     local force_new="${2:-false}"
-    
-    # 检查是否已存在
+
+    if [ -z "$workdir" ]; then
+        echo "Error: Working directory is required" >&2
+        return 1
+    fi
+
+    # Check if already exists
     if [ "$force_new" != "true" ]; then
         local existing=$(get_session "$workdir")
         if [ -n "$existing" ]; then
@@ -43,44 +54,101 @@ set_session() {
             return 0
         fi
     fi
-    
-    # 生成新的 session_id
+
+    # Generate new session_id
     local session_id="session-$(date +%s)-$$"
-    
-    # 写入映射
+
+    # Write mapping (use temp file for atomic operation)
     local tmp_file=$(mktemp)
-    jq --arg dir "$workdir" --arg sid "$session_id" '.[$dir] = $sid' "$SESSIONS_FILE" > "$tmp_file" && mv "$tmp_file" "$SESSIONS_FILE"
-    
-    echo "$session_id"
+    if jq --arg dir "$workdir" --arg sid "$session_id" '.[$dir] = $sid' "$SESSIONS_FILE" > "$tmp_file" 2>/dev/null; then
+        mv "$tmp_file" "$SESSIONS_FILE"
+        echo "$session_id"
+    else
+        rm -f "$tmp_file"
+        echo "Error: Failed to update sessions file" >&2
+        return 1
+    fi
 }
 
-# 列出所有映射
+# List all mappings
 list_sessions() {
+    if [ ! -f "$SESSIONS_FILE" ]; then
+        echo "{}"
+        return 0
+    fi
+
+    # Validate JSON format
+    if ! jq empty "$SESSIONS_FILE" 2>/dev/null; then
+        echo "Error: Invalid JSON in sessions file" >&2
+        return 1
+    fi
+
     jq '.' "$SESSIONS_FILE"
 }
 
-# 删除映射
+# Remove mapping
 remove_session() {
     local workdir="$1"
+
+    if [ -z "$workdir" ]; then
+        echo "Error: Working directory is required" >&2
+        return 1
+    fi
+
     local tmp_file=$(mktemp)
-    jq --arg dir "$workdir" 'del(.[$dir])' "$SESSIONS_FILE" > "$tmp_file" && mv "$tmp_file" "$SESSIONS_FILE"
-    echo "Removed: $workdir"
+    if jq --arg dir "$workdir" 'del(.[$dir])' "$SESSIONS_FILE" > "$tmp_file" 2>/dev/null; then
+        mv "$tmp_file" "$SESSIONS_FILE"
+        echo "Removed: $workdir"
+    else
+        rm -f "$tmp_file"
+        echo "Error: Failed to update sessions file" >&2
+        return 1
+    fi
 }
 
-# 获取或创建 session（智能模式）
+# Get or create session (smart mode)
 get_or_create() {
     local workdir="$1"
+
+    if [ -z "$workdir" ]; then
+        echo "Error: Working directory is required" >&2
+        return 1
+    fi
+
     local session_id=$(get_session "$workdir")
-    
+
     if [ -n "$session_id" ]; then
         echo "existing:$session_id"
     else
         local new_id=$(set_session "$workdir" "true")
-        echo "new:$new_id"
+        if [ $? -eq 0 ]; then
+            echo "new:$new_id"
+        else
+            return 1
+        fi
     fi
 }
 
-# ==================== 主程序 ====================
+# Show help
+show_help() {
+    echo "Usage: $0 {get|set|list|remove|get-or-create} [workdir]"
+    echo ""
+    echo "Commands:"
+    echo "  get <workdir>              Get session_id for directory"
+    echo "  set <workdir> [force]      Create new session_id (force=true to overwrite)"
+    echo "  list                       List all session mappings"
+    echo "  remove <workdir>           Remove session mapping"
+    echo "  get-or-create <workdir>    Get existing or create new session"
+    echo ""
+    echo "Examples:"
+    echo "  $0 get /path/to/project          # Get session_id"
+    echo "  $0 set /path/to/project          # Create new session_id"
+    echo "  $0 list                          # List all mappings"
+    echo "  $0 remove /path/to/project       # Remove mapping"
+    echo "  $0 get-or-create /path/to/project # Get or create (smart)"
+}
+
+# ============ Main Program ============
 case "${1:-}" in
     get)
         get_session "$2"
@@ -97,15 +165,11 @@ case "${1:-}" in
     get-or-create)
         get_or_create "$2"
         ;;
+    help|--help|-h)
+        show_help
+        ;;
     *)
-        echo "用法：$0 {get|set|list|remove|get-or-create} [workdir]"
-        echo ""
-        echo "示例："
-        echo "  $0 get /path/to/project          # 获取 session_id"
-        echo "  $0 set /path/to/project          # 创建新 session_id"
-        echo "  $0 list                          # 列出所有映射"
-        echo "  $0 remove /path/to/project       # 删除映射"
-        echo "  $0 get-or-create /path/to/project # 获取或创建（智能）"
+        show_help
         exit 1
         ;;
 esac

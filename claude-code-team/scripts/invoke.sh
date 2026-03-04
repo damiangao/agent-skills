@@ -1,22 +1,22 @@
 #!/bin/bash
-# Claude Code Agent Teams - 异步执行编码任务（带 Session 管理）
-# 用法：invoke.sh "任务描述" [工作目录] [Session ID 或 new]
+# Claude Code Agent Teams - Async Task Executor with Session Management
+# Usage: invoke.sh "Task Description" [Working Directory] [Session ID or new]
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/../lib"
 CONFIG_FILE="${SCRIPT_DIR}/../config/settings.json"
 SESSION_MANAGER="${SCRIPT_DIR}/session-manager.sh"
 
-# 加载配置模块
+# Load configuration module
 source "${LIB_DIR}/config.sh" 2>/dev/null || {
-    echo "❌ 错误：无法加载配置模块"
+    echo "Error: Cannot load configuration module" >&2
     exit 1
 }
 
-# 导出配置到环境变量
+# Export configuration to environment variables
 export_config
 
-# 颜色定义
+# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -35,106 +35,126 @@ error() {
     echo -e "${RED}✗${NC} $1"
 }
 
-# ============ 环境校验 ============
+# ============ Environment Validation ============
 validate_environment() {
     local has_error=0
 
-    echo "=== 环境校验 ==="
+    echo "=== Environment Validation ==="
     echo ""
 
-    # 检查 claude 命令
+    # Check claude command
     if ! command -v claude &> /dev/null; then
-        error "claude 命令未找到"
-        echo "  请先安装 Claude Code CLI"
+        error "claude command not found"
+        echo "  Please install Claude Code CLI:"
+        echo "  npm install -g @anthropic-ai/claude-cli"
         has_error=1
     else
-        info "claude 命令已安装"
+        info "claude command is installed"
     fi
 
-    # 检查 jq
+    # Check jq
     if ! command -v jq &> /dev/null; then
-        error "jq 未安装"
+        error "jq is not installed"
         echo "  Ubuntu/Debian: sudo apt-get install jq"
         echo "  macOS: brew install jq"
         has_error=1
     else
-        info "jq 已安装"
+        info "jq is installed"
     fi
 
-    # 检查 API Key
-    local api_key=$(get_config "api_key")
-    if [ -z "$api_key" ]; then
-        error "ANTHROPIC_API_KEY 未设置"
-        echo "  请设置环境变量: export ANTHROPIC_API_KEY='your-key'"
+    # Check curl
+    if ! command -v curl &> /dev/null; then
+        error "curl is not installed"
+        echo "  Ubuntu/Debian: sudo apt-get install curl"
+        echo "  macOS: brew install curl"
         has_error=1
     else
-        info "ANTHROPIC_API_KEY 已设置"
+        info "curl is installed"
     fi
 
-    # 检查 Gateway Token（可选）
+    # Check API Key
+    local api_key=$(get_config "api_key")
+    if [ -z "$api_key" ]; then
+        error "ANTHROPIC_API_KEY is not set"
+        echo "  Set environment variable: export ANTHROPIC_API_KEY='your-key'"
+        has_error=1
+    else
+        info "ANTHROPIC_API_KEY is set"
+    fi
+
+    # Check Gateway Token (optional)
     local gateway_token=$(get_config "gateway_token")
     if [ -z "$gateway_token" ]; then
-        warn "OPENCLAW_GATEWAY_TOKEN 未设置（可选）"
-        echo "  设置后可启用自动唤醒功能"
+        warn "OPENCLAW_GATEWAY_TOKEN is not set (optional)"
+        echo "  Set this to enable auto-wake functionality"
     else
-        info "OPENCLAW_GATEWAY_TOKEN 已设置"
+        info "OPENCLAW_GATEWAY_TOKEN is set"
     fi
 
     echo ""
 
     if [ $has_error -eq 1 ]; then
-        echo "=== 环境校验失败 ==="
+        echo "=== Environment Validation Failed ==="
         exit 1
     else
-        echo "=== 环境校验通过 ==="
+        echo "=== Environment Validation Passed ==="
         echo ""
     fi
 }
 
-# ============ 读取配置 ============
+# ============ Read Configuration ============
 read_config() {
-    # 使用配置模块读取配置
+    # Use configuration module to read settings
     API_BASE_URL=$(get_config "api_base_url")
     API_KEY=$(get_config "api_key")
     MODEL=$(get_config "model")
     RESULT_DIR=$(get_config "result_dir")
 
-    # 读取通知配置
+    # Read notification configuration
     NOTIFY_CHANNELS=$(get_config "notify.channels")
     FEISHU_CHAT_ID=$(get_config "notify.feishu.chat_id")
 
-    # 确保结果目录存在
-    mkdir -p "$RESULT_DIR"
-}
-
-# ============ 参数解析 ============
-parse_args() {
-    TASK="${1:-}"
-    WORKDIR="${2:-/root/.openclaw/workspace}"
-    SESSION_INPUT="${3:-auto}"
-
-    if [ -z "$TASK" ]; then
-        echo "用法：$0 '任务描述' [工作目录] [Session ID]"
-        echo ""
-        echo "Session ID 选项："
-        echo "  auto      自动管理（默认）：首次创建，后续复用"
-        echo "  new       强制创建新 Session"
-        echo "  <id>      使用指定 Session ID"
-        echo ""
-        echo "示例："
-        echo "  $0 'Create a snake game' /path/to/project"
-        echo "  $0 'Fix login bug' /path/to/project new"
-        echo "  $0 'Hotfix' /path/to/project hotfix-001"
-        echo ""
-        echo "通知渠道（通过 config/settings.json 配置）："
-        echo "  - Feishu (默认)"
-        echo "  - Discord (需配置 webhook_url)"
-        echo "  - Telegram (需配置 bot_token 和 chat_id)"
+    # Ensure result directory exists
+    if ! mkdir -p "$RESULT_DIR" 2>/dev/null; then
+        error "Failed to create result directory: $RESULT_DIR"
         exit 1
     fi
 }
 
-# ============ Session 管理 ============
+# ============ Parse Arguments ============
+parse_args() {
+    TASK="${1:-}"
+    WORKDIR="${2:-${HOME}/claude-code-projects}"
+    SESSION_INPUT="${3:-auto}"
+
+    if [ -z "$TASK" ]; then
+        echo "Usage: $0 'Task Description' [Working Directory] [Session ID]"
+        echo ""
+        echo "Session ID options:"
+        echo "  auto      Auto-manage (default): create first time, reuse later"
+        echo "  new       Force create new Session"
+        echo "  <id>      Use specified Session ID"
+        echo ""
+        echo "Examples:"
+        echo "  $0 'Create a snake game' /path/to/project"
+        echo "  $0 'Fix login bug' /path/to/project new"
+        echo "  $0 'Hotfix' /path/to/project hotfix-001"
+        echo ""
+        echo "Notification channels (configure via config/settings.json):"
+        echo "  - Feishu (default)"
+        echo "  - Discord (requires webhook_url)"
+        echo "  - Telegram (requires bot_token and chat_id)"
+        exit 1
+    fi
+
+    # Validate task description (basic security check)
+    if [[ "$TASK" =~ \$\( ]] || [[ "$TASK" =~ \` ]]; then
+        error "Invalid characters in task description"
+        exit 1
+    fi
+}
+
+# ============ Session Management ============
 manage_session() {
     if [ "$SESSION_INPUT" = "auto" ]; then
         local session_result=$("$SESSION_MANAGER" get-or-create "$WORKDIR")
@@ -142,35 +162,35 @@ manage_session() {
         SESSION_ID="${session_result#*:}"
 
         if [ "$session_status" = "existing" ]; then
-            info "复用 Session: $SESSION_ID"
+            info "Reusing Session: $SESSION_ID"
         else
-            info "创建新 Session: $SESSION_ID"
+            info "Creating new Session: $SESSION_ID"
         fi
     elif [ "$SESSION_INPUT" = "new" ]; then
         SESSION_ID=$("$SESSION_MANAGER" set "$WORKDIR" "true")
-        info "新建 Session: $SESSION_ID"
+        info "Creating new Session: $SESSION_ID"
     else
         SESSION_ID="$SESSION_INPUT"
-        info "使用指定 Session: $SESSION_ID"
+        info "Using specified Session: $SESSION_ID"
     fi
 
     TASK_NAME="$SESSION_ID"
 }
 
-# ============ 任务准备 ============
+# ============ Prepare Task ============
 prepare_task() {
     echo ""
-    echo -e "${BLUE}🚀 启动 Claude Code Agent Teams${NC}"
-    echo "📋 任务：$TASK"
-    echo "📁 工作目录：$WORKDIR"
-    echo "🔧 模型：$MODEL"
-    echo "📢 通知渠道：$NOTIFY_CHANNELS"
+    echo -e "${BLUE}Starting Claude Code Agent Teams${NC}"
+    echo "Task: $TASK"
+    echo "Working Directory: $WORKDIR"
+    echo "Model: $MODEL"
+    echo "Notification Channels: $NOTIFY_CHANNELS"
     echo ""
 
-    # 清理旧结果
+    # Clean old results
     rm -f "$RESULT_DIR/latest.json" "$RESULT_DIR/pending-wake.json" "$RESULT_DIR/.hook-lock" "$RESULT_DIR/.task-done" 2>/dev/null
 
-    # 写入任务元数据（使用 jq 确保 JSON 格式正确）
+    # Write task metadata (use jq to ensure proper JSON format)
     mkdir -p "$RESULT_DIR"
     jq -n \
         --arg task_name "${TASK_NAME}" \
@@ -178,7 +198,7 @@ prepare_task() {
         --arg prompt "${TASK}" \
         --arg workdir "${WORKDIR}" \
         --arg started_at "$(date -Iseconds)" \
-        --argjson notify_channels "${NOTIFY_CHANNELS}" \
+        --argjson notify_channels "${NOTIFY_CHANNELS:-[]}" \
         '{
             task_name: $task_name,
             session_id: $session_id,
@@ -190,12 +210,14 @@ prepare_task() {
         }' > "$RESULT_DIR/task-meta.json"
 }
 
-# ============ 创建并启动后台脚本 ============
+# ============ Launch Task in Background ============
 launch_task() {
-    # 创建后台执行脚本
+    # Create background execution script
     local run_script="/tmp/claude-run-${TASK_NAME}.sh"
     cat > "$run_script" << RUNEOF
 #!/bin/bash
+set -e
+
 TASK="\$1"
 WORKDIR="\$2"
 RESULT_DIR="\$3"
@@ -211,21 +233,28 @@ export ANTHROPIC_API_KEY="\$API_KEY"
 export ANTHROPIC_MODEL="\$MODEL"
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 
-# 确保工作目录存在
-mkdir -p "\$WORKDIR"
+# Ensure working directory exists
+if [ ! -d "\$WORKDIR" ]; then
+    echo "Creating working directory: \$WORKDIR"
+    mkdir -p "\$WORKDIR" || {
+        echo "Error: Cannot create working directory \$WORKDIR" >&2
+        exit 1
+    }
+fi
+
 cd "\$WORKDIR" || {
-    echo "错误：无法切换到工作目录 \$WORKDIR" >&2
+    echo "Error: Cannot change to working directory \$WORKDIR" >&2
     exit 1
 }
 
-# 执行任务
+# Execute task
 stdbuf -oL -eL claude -p "\$TASK" --permission-mode acceptEdits --teammate-mode auto > "\$RESULT_DIR/task-output.txt" 2>&1
 
 EXIT_CODE=\$?
 echo "Exit code: \$EXIT_CODE" >> "\$RESULT_DIR/task-output.txt"
 sync
 
-# 更新元数据
+# Update metadata
 cat > "\$RESULT_DIR/task-meta.json.tmp" << METAEOF
 {
   "task_name": "\${TASK_NAME}",
@@ -239,7 +268,7 @@ cat > "\$RESULT_DIR/task-meta.json.tmp" << METAEOF
 METAEOF
 mv "\$RESULT_DIR/task-meta.json.tmp" "\$RESULT_DIR/task-meta.json"
 
-# 触发 Hook
+# Trigger Hook (if exists)
 if [ -f "\${HOME}/.claude/hooks/notify-agi.sh" ]; then
     echo "{\"session_id\":\"\${SESSION_ID}\",\"hook_event_name\":\"Stop\",\"cwd\":\"\${WORKDIR}\"}" | \
         bash "\${HOME}/.claude/hooks/notify-agi.sh" &
@@ -248,62 +277,62 @@ RUNEOF
 
     chmod +x "$run_script"
 
-    # 后台启动
+    # Launch in background
     nohup bash "$run_script" "$TASK" "$WORKDIR" "$RESULT_DIR" "$TASK_NAME" \
         "$API_BASE_URL" "$API_KEY" "$MODEL" "$SESSION_ID" "$NOTIFY_CHANNELS" \
         > /dev/null 2>&1 &
     PID=$!
 
-    info "任务已启动 (PID: $PID)"
-    echo "📝 完成后会自动通知你"
+    info "Task started (PID: $PID)"
+    echo "You will be notified when the task completes"
 }
 
-# ============ 发送启动通知 ============
+# ============ Send Start Notification ============
 send_start_notification() {
-    local msg="🚀 Claude Code 任务已启动
+    local msg="Claude Code Task Started
 
-任务：${TASK}
+Task: ${TASK}
 Session: ${SESSION_ID}
-目录: ${WORKDIR}
+Directory: ${WORKDIR}
 
-⏳ 任务正在后台执行，完成后会通知你。"
+The task is running in the background. You will be notified when it completes."
 
-    # 加载通知模块
+    # Load notification module
     source "${LIB_DIR}/notify.sh" 2>/dev/null || return
 
     send_notification "$msg" &
 }
 
-# ============ 主程序 ============
+# ============ Main Program ============
 main() {
-    # 初始化配置文件（如果不存在）
+    # Initialize configuration file (if not exists)
     init_config > /dev/null 2>&1
 
-    # 环境校验
+    # Environment validation
     validate_environment
 
-    # 读取配置
+    # Read configuration
     read_config
 
-    # 解析参数
+    # Parse arguments
     parse_args "$@"
 
-    # 管理 Session
+    # Manage session
     manage_session
 
-    # 准备任务
+    # Prepare task
     prepare_task
 
-    # 启动任务
+    # Launch task
     launch_task
 
-    # 发送启动通知
+    # Send start notification
     send_start_notification
 
     echo ""
-    echo "💡 提示："
-    echo "  - 查看输出: tail -f ${RESULT_DIR}/task-output.txt"
-    echo "  - Session 管理: scripts/session-manager.sh list"
+    echo "Tips:"
+    echo "  - View output: tail -f ${RESULT_DIR}/task-output.txt"
+    echo "  - Session management: scripts/session-manager.sh list"
 }
 
 main "$@"

@@ -214,3 +214,6 @@ __marimo__/
 # API Keys and secrets
 **/config/settings.local.json
 **/.env
+
+# Don't ignore lib in claude-code-team (it's part of the skill, not Python lib)
+!claude-code-team/lib/

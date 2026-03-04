@@ -1,6 +1,6 @@
 {
   "api_base_url": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-  "model": "kimi-k2.5",
+  "model": "claude-sonnet-4-6",
   "result_dir": "/root/.openclaw/data/claude-code-results",
   "notify": {
     "channels": ["feishu"],
