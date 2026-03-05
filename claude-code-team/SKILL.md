@@ -33,15 +33,6 @@ export ANTHROPIC_API_KEY="sk-xxx"
 ./main.sh invoke "Create a snake game" /path/to/project
 ```
 
-### Via mcporter
-
-```bash
-mcporter call claude-code-team.invoke_task \
-  task="Create a snake game" \
-  workdir="/path/to/project" \
-  session="auto"
-```
-
 ## Setup
 
 ### Prerequisites

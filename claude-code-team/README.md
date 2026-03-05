@@ -130,25 +130,6 @@ Results saved to `result_dir` (default: `~/.openclaw/data/claude-code-results/`)
 | `task-output.txt` | Full output |
 | `task-meta.json` | Metadata (status, exit code, timestamps) |
 
-## MCP-Style Usage
-
-### Via cli.sh
-
-```bash
-./cli.sh invoke_task "Create a snake game" /path/to/project
-./cli.sh list_sessions
-./cli.sh check_env
-```
-
-### Via mcporter
-
-```bash
-mcporter call claude-code-team.invoke_task \
-  task="Create a snake game" \
-  workdir="/path/to/project" \
-  session="auto"
-```
-
 ## Troubleshooting
 
 ```bash
