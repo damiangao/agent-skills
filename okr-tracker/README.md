@@ -65,3 +65,41 @@ okr-tracker/
 ## License
 
 MIT
+
+---
+
+## 📝 最佳实践
+
+### 异步调用（推荐）
+
+使用 claude-code-team 执行任务时，采用异步调用方式：
+
+```bash
+# ✅ 正确方式：后台执行，不阻塞
+./main.sh invoke "任务" /path &
+
+# ❌ 错误方式：不要 poll 等待
+./main.sh invoke "任务" /path
+process poll --sessionId xxx  # 阻塞主会话
+```
+
+### 为什么异步调用？
+
+1. **不阻塞主对话** - 可以继续处理其他请求
+2. **自动通知** - 完成后通过 Feishu 自动推送结果
+3. **真正并发** - 可以同时执行多个任务
+
+### 调用流程
+
+```
+启动任务 → 立即回复 → 等 Feishu 通知
+   ↓
+后台异步执行
+   ↓
+完成后自动推送结果
+```
+
+### 相关技能
+
+- [claude-code-team](../claude-code-team/README.md) - 异步代码任务执行
+- [okr-tracker](./README.md) - OKR 追踪与提醒

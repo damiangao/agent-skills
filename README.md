@@ -168,3 +168,53 @@ Apache License 2.0
 ## Contributing
 
 Issues and Pull Requests are welcome!
+
+---
+
+## 📝 最佳实践
+
+### 异步调用（所有 skill 通用）
+
+使用 `claude-code-team` 或其他 skill 执行任务时，采用异步调用：
+
+```bash
+# ✅ 正确方式：后台执行，不阻塞主会话
+./main.sh invoke "任务" /path &
+
+# ❌ 错误方式：不要 poll 等待
+./main.sh invoke "任务" /path
+process poll --sessionId xxx  # 阻塞主会话，无法回复其他消息
+```
+
+### 为什么异步调用？
+
+| 优势 | 说明 |
+|------|------|
+| **不阻塞主对话** | 可以继续处理其他请求 |
+| **自动通知** | 完成后通过 Feishu 自动推送结果 |
+| **真正并发** | 可以同时执行多个任务 |
+| **更好的用户体验** | 立即响应，不需要等待 |
+
+### 调用流程
+
+```
+1. 启动任务（后台执行）
+   ↓
+2. 立即回复用户："任务已启动，完成后通知你～"
+   ↓
+3. 不 poll 等待
+   ↓
+4. 等 Feishu 通知推送结果
+```
+
+### 学习来源
+
+基于实际使用经验总结：
+- 问题：poll 等待阻塞主会话，无法及时回复用户
+- 解决：启动任务后立即回复，依赖 Feishu 通知
+- 效果：主会话不再阻塞，可以同时处理多个请求
+
+### 相关技能
+
+- [claude-code-team](./claude-code-team/README.md) - 异步代码任务执行
+- [okr-tracker](./okr-tracker/README.md) - OKR 追踪与提醒
