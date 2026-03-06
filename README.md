@@ -35,6 +35,17 @@ Render Mermaid syntax to PNG/SVG images.
 
 [View Documentation](./mermaid-render/SKILL.md)
 
+### 4. OKR Tracker (okr-tracker)
+
+OKR 周期性追踪与提醒技能，帮助用户追踪目标进度、设置定时提醒、生成进度报告。
+
+- **OKR 追踪** - 管理多个 OKR 目标的进度
+- **周期提醒** - 每日/每周/每月定时提醒
+- **进度报告** - 自动生成月度/季度汇总
+- **自然语言** - 用对话方式更新进度
+
+[View Documentation](./okr-tracker/SKILL.md)
+
 ## Quick Start
 
 ### Requirements
@@ -62,6 +73,7 @@ brew install jq curl
 # Example: Deploy to OpenClaw skills directory
 cp -r claude-code-team /root/.openclaw/workspace/skills/
 cp -r mermaid-render /root/.openclaw/workspace/skills/
+cp -r okr-tracker /root/.openclaw/workspace/skills/
 ```
 
 ### Configuration
@@ -94,6 +106,19 @@ scripts/session-manager.sh list
 python3 render.py "flowchart TD; A-->B; B-->C" output.png
 ```
 
+### OKR Tracker
+
+```bash
+# View OKR status
+./cli.sh status
+
+# Update progress
+./cli.sh update exercise 3
+
+# Log daily entry
+./cli.sh log "今天完成了原型设计"
+```
+
 ## Directory Structure
 
 ```
@@ -123,9 +148,17 @@ agent-skills/
 │   │   └── validate.sh
 │   └── config/
 │       └── settings.json
-└── mermaid-render/               # Mermaid rendering tool
+├── mermaid-render/               # Mermaid rendering tool
+│   ├── SKILL.md
+│   └── render.py
+└── okr-tracker/                  # OKR tracking & reminders
     ├── SKILL.md
-    └── render.py
+    ├── README.md
+    ├── cli.sh
+    ├── _meta.json
+    ├── .gitignore
+    ├── config/
+    └── data/
 ```
 
 ## License
