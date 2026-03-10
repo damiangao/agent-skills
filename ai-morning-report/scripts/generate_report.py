@@ -1,31 +1,31 @@
 #!/usr/bin/env python3
 """
-AI 新闻早报生成器 - LLM 版本
-使用 baidu-search 搜索新闻，用 LLM 总结成固定格式
+AI 新闻早报生成器 - 搜索工具
+
+使用 baidu-search 搜索新闻，调用 search_news.py 的媒体处理逻辑
+返回原始数据给 OpenClaw 处理
 
 使用方法:
   python3 generate_report.py
 
+输出:
+  JSON 格式的新闻列表，供 OpenClaw 总结
+
 环境变量:
-  LLM_API_URL - LLM API 地址
-  LLM_API_KEY - LLM API Key
-  LLM_MODEL - LLM 模型名称
-  DELIVERY_CHANNEL - 推送渠道 (feishu/qqbot/wechat)
-  DELIVERY_TARGET - 推送目标用户/频道
+  DELIVERY_CHANNEL - 推送渠道 (可选)
+  DELIVERY_TARGET - 推送目标 (可选)
 """
 
 import json
 import subprocess
 import sys
 import os
-import requests
 from datetime import datetime
 
 # ============ 配置项 =============
-# 从环境变量读取配置，支持自定义
 CONFIG = {
-    # 搜索关键词
-    "QUERIES": [
+    # 话题搜索关键词
+    "TOPIC_QUERIES": [
         "AI 大模型",
         "人工智能 自动驾驶",
         "AI 智能体 Agent",
@@ -33,20 +33,23 @@ CONFIG = {
         "OpenAI 谷歌 英伟达",
     ],
     
+    # 专业 AI 媒体搜索（确保搜到专业媒体）
+    "MEDIA_QUERIES": [
+        "机器之心 site:jiqizhixin.com",
+        "新智元 site:aiera.com",
+        "量子位 site:qbitai.com",
+        "36 氪 AI site:36kr.com",
+    ],
+    
     "SEARCH_TOP_K": 10,      # 每个关键词搜索结果数
-    "NEWS_COUNT": 10,        # 最终精选新闻数
-    
-    # LLM 配置（从环境变量读取）
-    "LLM_API_URL": os.getenv("LLM_API_URL", "https://api.minimax.chat/v1/messages"),
-    "LLM_API_KEY": os.getenv("LLM_API_KEY", ""),
-    "LLM_MODEL": os.getenv("LLM_MODEL", "MiniMax-M2.5"),
-    
-    # 推送配置（从环境变量读取）
-    "DELIVERY_CHANNEL": os.getenv("DELIVERY_CHANNEL", ""),
-    "DELIVERY_TARGET": os.getenv("DELIVERY_TARGET", ""),
+    "NEWS_COUNT": 50,        # 返回给 LLM 的新闻数量
 }
 
 # ===============================
+
+# 导入 search_news.py 的函数
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from search_news import extract_real_source, is_valid_source, sort_news_by_priority
 
 
 def search_news(query):
@@ -74,180 +77,181 @@ def search_news(query):
             data = json.loads(json_output)
             return data if isinstance(data, list) else []
     except Exception as e:
-        print(f"搜索 '{query}' 失败: {e}", file=sys.stderr)
+        print(f"搜索 '{query}' 失败：{e}", file=sys.stderr)
     return []
 
 
-def call_llm(prompt: str) -> str:
-    """调用 LLM 生成内容"""
-    headers = {
-        "Authorization": f"Bearer {CONFIG['LLM_API_KEY']}",
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01"
-    }
+def fetch_news():
+    """获取新闻列表，处理媒体来源"""
+    print("🔍 搜索 AI 新闻...")
     
-    payload = {
-        "model": CONFIG['LLM_MODEL'],
-        "max_tokens": 8192,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
-    }
-    
-    try:
-        response = requests.post(
-            CONFIG['LLM_API_URL'],
-            headers=headers,
-            json=payload,
-            timeout=120
-        )
-        response.raise_for_status()
-        result = response.json()
-        
-        # 解析 content（可能是 thinking + text）
-        content = result.get("content", [])
-        for item in content:
-            if item.get("type") == "text":
-                return item.get("text", "")
-        
-        return ""
-    except Exception as e:
-        print(f"LLM 调用失败: {e}", file=sys.stderr)
-        return ""
-
-
-def generate_report():
-    """生成早报"""
-    print("🔍 搜索AI新闻...")
-    
-    # 1. 搜索新闻
     all_news = []
-    for query in CONFIG['QUERIES']:
-        print(f"  搜索: {query}")
+    
+    # 1. 搜索话题新闻
+    print("\n📌 话题搜索：")
+    for query in CONFIG['TOPIC_QUERIES']:
+        print(f"  搜索：{query}")
         results = search_news(query)
-        all_news.extend(results)
-        print(f"    获取 {len(results)} 条")
+        for news in results:
+            processed = process_news(news)
+            if processed:
+                all_news.append(processed)
     
-    print(f"\n📰 共获取 {len(all_news)} 条新闻")
+    # 2. 搜索专业媒体（确保搜到）
+    print("\n📌 专业媒体搜索：")
+    for query in CONFIG['MEDIA_QUERIES']:
+        print(f"  搜索：{query}")
+        results = search_news(query)
+        for news in results:
+            processed = process_news(news)
+            if processed:
+                all_news.append(processed)
     
-    # 2. 截取关键信息
+    print(f"\n📰 共获取 {len(all_news)} 条有效新闻")
+    
+    # 按优先级排序
+    sorted_news = sort_news_by_priority(all_news)
+    
+    # 过滤低质量媒体
+    low_quality = ['云南网', '陕西网', '中国环境', '中国日报网']
+    filtered_news = [n for n in sorted_news if n['source'] not in low_quality]
+    print(f"🗑️ 过滤低质量媒体后剩 {len(filtered_news)} 条")
+    
+    # 去重
+    deduped = deduplicate(filtered_news)
+    print(f"🔄 去重后剩 {len(deduped)} 条")
+    
+    # 返回完整内容，让 OpenClaw 的 LLM 来总结精简
     news_list = []
-    for news in all_news[:50]:  # 取前50条作为上下文
-        title = news.get('title', '')[:80]
-        content = news.get('content', '')[:200]
-        url = news.get('url', '')
-        date = news.get('date', '')[:10]
-        source = news.get('website', '')
-        
+    for news in deduped[:CONFIG['NEWS_COUNT']]:
         news_list.append({
-            "title": title,
-            "content": content,
-            "url": url,
-            "date": date,
-            "source": source
+            "title": news.get('title', ''),
+            "content": news.get('content', ''),  # 完整内容，不截断
+            "url": news.get('url', ''),
+            "date": news.get('date', '')[:10],
+            "source": news.get('source', '未知'),
+            "weight": news.get('weight', 0)
         })
     
-    # 3. 构建 LLM prompt
-    today = datetime.now()
-    month_day = f"{today.month}月{today.day}日"
+    return news_list
+
+
+def process_news(news):
+    """处理单条新闻，提取真实来源"""
+    real_source = extract_real_source(news)
     
-    news_json = json.dumps(news_list, ensure_ascii=False, indent=2)
+    # 严格过滤：没识别出真实来源就扔掉
+    if not real_source:
+        return None
+    if real_source == '未知':
+        return None
     
-    prompt = f"""你是一个AI新闻早报编辑。请根据以下搜索到的AI新闻，生成今日早报。
-
-## 要求：
-1. 筛选出 {CONFIG['NEWS_COUNT']} 条最有价值的AI新闻
-2. **只选择日期为最近 2 天的新闻**,不要选择更早的旧闻
-3. 按重要程度排序（参考来源的权威性）
-4. **来源字段必须使用真实媒体名称**，可选来源如下（按优先级排序）：
-   - 专业AI媒体（优先）：机器之心、新智元、量子位、AIbase、AI科技评论
-   - 官方媒体：新华社、人民日报、人民网、新华网、央视新闻、央广网、中证网
-   - 综合科技媒体：36氪、钛媒体、虎嗅、雷锋网
-   - 主流门户：新浪网、网易、凤凰网
-   - 财经媒体：金融界、同花顺、金十数据、财联社
-   **严禁显示"百家号"，必须从上述列表中选择合适的真实媒体名称**
-5. 如果无法确定具体媒体，根据新闻内容性质选择最接近的媒体类型
-6. 每条新闻必须包含：标题、简述（50字内）、我的理解（1句话）、来源、日期
-
-## 输出格式：
-```
-📰 今日 AI 新闻早报（{month_day}）
-📰 早报字数：约XXX字 | ⏱️ 预估阅读时间：X分钟
-
----
-
-⭐⭐⭐⭐⭐ | [标题](链接)
-简述：xxx
-我的理解：xxx
-来源：xxx | 日期
-
----
-```
-
-## 搜索结果：
-{news_json}
-
-请直接输出早报内容，不要有其他说明。"""
-
-    # 4. 调用 LLM 生成早报
-    print("\n🤖 LLM 正在生成早报...")
-    report = call_llm(prompt)
+    # 检查 URL 是否来自百家号
+    url = news.get('url', '').lower()
+    is_baijiahao = 'baijiahao.baidu.com' in url or 'baijia.baidu.com' in url
     
-    if report:
-        print("\n" + "="*50)
-        print(report)
-        print("="*50)
-    else:
-        print("❌ LLM 生成失败")
+    # 如果是百家号，需要进一步判断
+    if is_baijiahao:
+        # 专业媒体、权威媒体、综合科技媒体在百家号发文章 → 保留
+        trusted_sources = [
+            # 专业 AI 媒体
+            '机器之心', '新智元', '量子位', 'AIbase', 'AI 科技评论',
+            # 权威官方媒体
+            '新华社', '人民日报', '央视新闻', '新华网', '中证网', '央广网',
+            # 综合科技媒体
+            '36 氪', '钛媒体', '虎嗅', '雷锋网',
+            # 主流门户
+            '新浪', '网易', '凤凰网',
+            # 财经媒体
+            '同花顺', '金融界', '财联社', '证券时报', '财经网',
+        ]
+        # 检查是否是可信媒体
+        is_trusted = any(trusted in real_source for trusted in trusted_sources)
+        if not is_trusted:
+            # 不可信的百家号自媒体 → 过滤掉
+            return None
     
-    return report
+    weight = get_media_weight(real_source)
+    
+    return {
+        "title": news.get('title', ''),
+        "content": news.get('content', ''),
+        "url": news.get('url', ''),
+        "date": news.get('date', ''),
+        "source": real_source,
+        "weight": weight
+    }
 
 
-def send_report(report: str):
-    """发送早报到配置的渠道
+def get_media_weight(source: str) -> int:
+    """获取媒体权重"""
+    # 专业 AI 媒体
+    if any(m in source for m in ['机器之心', '新智元', '量子位', 'AIbase', 'AI科技评论']):
+        return 100
+    # 官方媒体
+    if any(m in source for m in ['新华社', '人民日报', '央视新闻', '新华网', '中证网']):
+        return 80
+    # 综合科技媒体
+    if any(m in source for m in ['36 氪', '钛媒体', '虎嗅', '雷锋网']):
+        return 60
+    # 主流门户
+    if any(m in source for m in ['新浪', '网易', '凤凰网']):
+        return 40
+    # 财经媒体
+    if any(m in source for m in ['同花顺', '金融界', '财联社']):
+        return 30
+    return 5
+
+
+def deduplicate(news_list):
+    """去重（基于标题相似度）"""
+    if not news_list:
+        return []
     
-    支持渠道：feishu, qqbot, wechat, telegram 等
-    通过环境变量 DELIVERY_CHANNEL 和 DELIVERY_TARGET 配置
-    """
-    channel = CONFIG.get("DELIVERY_CHANNEL", "")
-    target = CONFIG.get("DELIVERY_TARGET", "")
-    
-    if not channel:
-        print("ℹ️ 未配置推送渠道，跳过发送")
-        print("💡 设置环境变量：export DELIVERY_CHANNEL=feishu")
-        return False
-    
-    try:
-        cmd = ["openclaw", "message", "send", "--channel", channel]
-        
-        if target:
-            cmd.extend(["--target", target])
-        
-        cmd.extend(["--message", report])
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        
-        if result.returncode == 0:
-            print(f"✅ 早报已发送到 {channel}")
-            return True
-        else:
-            print(f"❌ 发送失败：{result.stderr}", file=sys.stderr)
-            return False
-    except Exception as e:
-        print(f"❌ 发送异常：{e}", file=sys.stderr)
-        return False
+    result = []
+    for news in news_list:
+        title = news.get('title', '')[:30].lower()
+        is_dup = False
+        for existing in result:
+            existing_title = existing.get('title', '')[:30].lower()
+            # 计算公共字符数
+            common = sum(1 for c in title if c in existing_title)
+            if common > len(title) * 0.6:
+                is_dup = True
+                # 保留权重高的
+                if news.get('weight', 0) > existing.get('weight', 0):
+                    result.remove(existing)
+                    result.append(news)
+                break
+        if not is_dup:
+            result.append(news)
+    return result
 
 
 if __name__ == "__main__":
-    # 检查 API Key 配置
-    if not CONFIG["LLM_API_KEY"]:
-        print("❌ 错误：未配置 LLM_API_KEY 环境变量")
-        print("💡 请设置：export LLM_API_KEY=your-api-key")
-        sys.exit(1)
+    # 获取新闻
+    news_list = fetch_news()
     
-    report = generate_report()
+    # 输出 JSON 格式，供 OpenClaw 读取
+    print("\n" + "="*50)
+    print("JSON_OUTPUT_START")
+    print(json.dumps(news_list, ensure_ascii=False, indent=2))
+    print("JSON_OUTPUT_END")
+    print("="*50)
     
-    # 发送早报到配置的渠道
-    if report:
-        print("\n📤 正在发送早报...")
-        send_report(report)
+    # 保存到文件（可选，用于调试）
+    output_file = "/root/.openclaw/workspace/ai_news_raw.json"
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(news_list, f, ensure_ascii=False, indent=2)
+    
+    print(f"\n📁 已保存到：{output_file}")
+    print(f"📰 共 {len(news_list)} 条新闻")
+    
+    # 统计来源
+    sources = {}
+    for news in news_list:
+        src = news['source']
+        sources[src] = sources.get(src, 0) + 1
+    print(f"📊 来源统计：{sources}")
+    
+    print("\n💡 下一步：请 OpenClaw 总结这些新闻并发送到飞书")

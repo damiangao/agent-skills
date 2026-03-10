@@ -124,6 +124,32 @@ def extract_real_source(news):
     website = news.get('website', '')
     full_text = title + ' ' + content
 
+    # ========== 0. 优先从内容中提取专业媒体名称（电头格式）==========
+    # 专业 AI 媒体的电头格式："新智元报道"、"机器之心"、"量子位"
+    content_start = content[:300] if content else ''
+    
+    # 电头匹配模式（优先级最高）- 确保媒体名和"报道"之间没有空格
+    dateline_patterns = [
+        # 据 XX 报道
+        r'^(\s*据)?(机器之心|新智元|量子位|AIbase|AI 科技评论)(报道|消息|讯|网)',
+        # XX 报道（没有空格）
+        r'^(\s*)(机器之心|新智元|量子位|AIbase|AI 科技评论)(报道)',
+    ]
+    
+    for pattern in dateline_patterns:
+        match = re.search(pattern, content_start, re.IGNORECASE)
+        if match:
+            extracted = match.group(2) if match.lastindex >= 2 else match.group(1)
+            # 标准化名称
+            name_mapping = {
+                '机器之心': '机器之心',
+                '新智元': '新智元',
+                '量子位': '量子位',
+                'AIbase': 'AIbase',
+                'AI 科技评论': 'AI 科技评论',
+            }
+            return name_mapping.get(extracted, extracted)
+    
     # ========== 1. 从 URL 中提取来源（最可靠）==========
     url_source_map = {
         # 专业 AI 媒体
@@ -433,6 +459,9 @@ def sort_news_by_priority(news_list):
         return (category_priority, -weight)
 
     return sorted(news_list, key=get_sort_key)
+
+
+def deduplicate(news_list):
     """去重（基于标题相似度）"""
     if not news_list:
         return []
