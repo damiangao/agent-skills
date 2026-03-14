@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """
-AI 新闻早报生成器 - 搜索工具
+AI 新闻早报 Skill - 数据准备
 
-使用 baidu-search 搜索新闻，调用 search_news.py 的媒体处理逻辑
-返回原始数据给 OpenClaw 处理
+搜索 AI 新闻，按媒体权威性排序，保存到 JSON 文件
+供 OpenClaw 大模型读取并生成早报
 
 使用方法:
   python3 generate_report.py
 
 输出:
-  JSON 格式的新闻列表，供 OpenClaw 总结
-
-环境变量:
-  DELIVERY_CHANNEL - 推送渠道 (可选)
-  DELIVERY_TARGET - 推送目标 (可选)
+  - 终端：搜索统计（JSON 格式，供 OpenClaw 读取）
+  - 文件：/root/.openclaw/workspace/ai_news_raw.json
 """
 
 import json
@@ -24,7 +21,7 @@ from datetime import datetime
 
 # ============ 配置项 =============
 CONFIG = {
-    # 话题搜索关键词
+    # 搜索关键词
     "TOPIC_QUERIES": [
         "AI 大模型",
         "人工智能 自动驾驶",
@@ -32,28 +29,30 @@ CONFIG = {
         "人形机器人",
         "OpenAI 谷歌 英伟达",
     ],
-    
-    # 专业 AI 媒体搜索（确保搜到专业媒体）
     "MEDIA_QUERIES": [
         "机器之心 site:jiqizhixin.com",
         "新智元 site:aiera.com",
         "量子位 site:qbitai.com",
         "36 氪 AI site:36kr.com",
     ],
+    "SEARCH_TOP_K": 10,
+    "NEWS_COUNT": 50,
     
-    "SEARCH_TOP_K": 10,      # 每个关键词搜索结果数
-    "NEWS_COUNT": 50,        # 返回给 LLM 的新闻数量
+    # 媒体权重
+    "MEDIA_WEIGHTS": {
+        100: ['机器之心', '新智元', '量子位', 'AIbase', 'AI 科技评论'],
+        80: ['新华社', '人民日报', '央视新闻', '新华网', '中证网'],
+        60: ['36 氪', '钛媒体', '虎嗅', '雷锋网'],
+        40: ['新浪', '网易', '凤凰网'],
+        30: ['财联社', '同花顺', '金融界'],
+    },
+    "BLACKLIST": ['百家号', '搜狐号', '今日头条', '知乎专栏', '云南网', '陕西网'],
 }
 
 # ===============================
 
-# 导入 search_news.py 的函数
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from search_news import extract_real_source, is_valid_source, sort_news_by_priority
-
-
 def search_news(query):
-    """调用 baidu-search 搜索新闻"""
+    """调用 baidu-search 搜索"""
     cmd = [
         "python3", "search.py",
         json.dumps({
@@ -62,7 +61,6 @@ def search_news(query):
             "resource_type_filter": [{"type": "web", "top_k": CONFIG['SEARCH_TOP_K']}]
         })
     ]
-    
     try:
         result = subprocess.run(
             cmd,
@@ -81,97 +79,57 @@ def search_news(query):
     return []
 
 
-def fetch_news():
-    """获取新闻列表，处理媒体来源"""
-    print("🔍 搜索 AI 新闻...")
+def get_media_weight(source: str) -> int:
+    """获取媒体权重"""
+    for weight, media_list in CONFIG['MEDIA_WEIGHTS'].items():
+        if any(m in source for m in media_list):
+            return weight
+    return 5
+
+
+def extract_real_source(news):
+    """提取真实来源"""
+    url = news.get('url', '').lower()
+    content = news.get('content', '')
     
-    all_news = []
+    if content:
+        media_patterns = [
+            '机器之心', '新智元', '量子位', '36 氪', '钛媒体', '虎嗅',
+            '新华社', '人民日报', '央视新闻', '新浪', '网易', '凤凰',
+            '财联社', '同花顺', 'AIbase', 'AI 科技评论'
+        ]
+        for media in media_patterns:
+            if media in content[:100]:
+                return media
     
-    # 1. 搜索话题新闻
-    print("\n📌 话题搜索：")
-    for query in CONFIG['TOPIC_QUERIES']:
-        print(f"  搜索：{query}")
-        results = search_news(query)
-        for news in results:
-            processed = process_news(news)
-            if processed:
-                all_news.append(processed)
+    if '36kr.com' in url:
+        return '36 氪'
+    elif 'jiqizhixin.com' in url:
+        return '机器之心'
+    elif 'aiera.com' in url:
+        return '新智元'
+    elif 'qbitai.com' in url:
+        return '量子位'
     
-    # 2. 搜索专业媒体（确保搜到）
-    print("\n📌 专业媒体搜索：")
-    for query in CONFIG['MEDIA_QUERIES']:
-        print(f"  搜索：{query}")
-        results = search_news(query)
-        for news in results:
-            processed = process_news(news)
-            if processed:
-                all_news.append(processed)
-    
-    print(f"\n📰 共获取 {len(all_news)} 条有效新闻")
-    
-    # 按优先级排序
-    sorted_news = sort_news_by_priority(all_news)
-    
-    # 过滤低质量媒体
-    low_quality = ['云南网', '陕西网', '中国环境', '中国日报网']
-    filtered_news = [n for n in sorted_news if n['source'] not in low_quality]
-    print(f"🗑️ 过滤低质量媒体后剩 {len(filtered_news)} 条")
-    
-    # 去重
-    deduped = deduplicate(filtered_news)
-    print(f"🔄 去重后剩 {len(deduped)} 条")
-    
-    # 返回完整内容，让 OpenClaw 的 LLM 来总结精简
-    news_list = []
-    for news in deduped[:CONFIG['NEWS_COUNT']]:
-        news_list.append({
-            "title": news.get('title', ''),
-            "content": news.get('content', ''),  # 完整内容，不截断
-            "url": news.get('url', ''),
-            "date": news.get('date', '')[:10],
-            "source": news.get('source', '未知'),
-            "weight": news.get('weight', 0)
-        })
-    
-    return news_list
+    return None
 
 
 def process_news(news):
-    """处理单条新闻，提取真实来源"""
+    """处理单条新闻"""
     real_source = extract_real_source(news)
-    
-    # 严格过滤：没识别出真实来源就扔掉
     if not real_source:
         return None
-    if real_source == '未知':
-        return None
     
-    # 检查 URL 是否来自百家号
     url = news.get('url', '').lower()
-    is_baijiahao = 'baijiahao.baidu.com' in url or 'baijia.baidu.com' in url
+    is_baijiahao = 'baijiahao.baidu.com' in url
     
-    # 如果是百家号，需要进一步判断
     if is_baijiahao:
-        # 专业媒体、权威媒体、综合科技媒体在百家号发文章 → 保留
-        trusted_sources = [
-            # 专业 AI 媒体
-            '机器之心', '新智元', '量子位', 'AIbase', 'AI 科技评论',
-            # 权威官方媒体
-            '新华社', '人民日报', '央视新闻', '新华网', '中证网', '央广网',
-            # 综合科技媒体
-            '36 氪', '钛媒体', '虎嗅', '雷锋网',
-            # 主流门户
-            '新浪', '网易', '凤凰网',
-            # 财经媒体
-            '同花顺', '金融界', '财联社', '证券时报', '财经网',
-        ]
-        # 检查是否是可信媒体
-        is_trusted = any(trusted in real_source for trusted in trusted_sources)
-        if not is_trusted:
-            # 不可信的百家号自媒体 → 过滤掉
+        trusted = ['机器之心', '新智元', '量子位', '36 氪', '新华社', '新浪', '网易']
+        if not any(t in real_source for t in trusted):
             return None
     
-    weight = get_media_weight(real_source)
+    if any(b in real_source for b in CONFIG['BLACKLIST']):
+        return None
     
     return {
         "title": news.get('title', ''),
@@ -179,46 +137,21 @@ def process_news(news):
         "url": news.get('url', ''),
         "date": news.get('date', ''),
         "source": real_source,
-        "weight": weight
+        "weight": get_media_weight(real_source)
     }
 
 
-def get_media_weight(source: str) -> int:
-    """获取媒体权重"""
-    # 专业 AI 媒体
-    if any(m in source for m in ['机器之心', '新智元', '量子位', 'AIbase', 'AI科技评论']):
-        return 100
-    # 官方媒体
-    if any(m in source for m in ['新华社', '人民日报', '央视新闻', '新华网', '中证网']):
-        return 80
-    # 综合科技媒体
-    if any(m in source for m in ['36 氪', '钛媒体', '虎嗅', '雷锋网']):
-        return 60
-    # 主流门户
-    if any(m in source for m in ['新浪', '网易', '凤凰网']):
-        return 40
-    # 财经媒体
-    if any(m in source for m in ['同花顺', '金融界', '财联社']):
-        return 30
-    return 5
-
-
 def deduplicate(news_list):
-    """去重（基于标题相似度）"""
-    if not news_list:
-        return []
-    
+    """去重"""
     result = []
     for news in news_list:
         title = news.get('title', '')[:30].lower()
         is_dup = False
         for existing in result:
             existing_title = existing.get('title', '')[:30].lower()
-            # 计算公共字符数
             common = sum(1 for c in title if c in existing_title)
             if common > len(title) * 0.6:
                 is_dup = True
-                # 保留权重高的
                 if news.get('weight', 0) > existing.get('weight', 0):
                     result.remove(existing)
                     result.append(news)
@@ -228,30 +161,54 @@ def deduplicate(news_list):
     return result
 
 
+def fetch_news():
+    """获取新闻"""
+    print("🔍 搜索 AI 新闻...", file=sys.stderr)
+    all_news = []
+    
+    for query in CONFIG['TOPIC_QUERIES'] + CONFIG['MEDIA_QUERIES']:
+        print(f"  搜索：{query}", file=sys.stderr)
+        results = search_news(query)
+        for news in results:
+            processed = process_news(news)
+            if processed:
+                all_news.append(processed)
+    
+    print(f"📰 共获取 {len(all_news)} 条", file=sys.stderr)
+    sorted_news = sorted(all_news, key=lambda x: x.get('weight', 0), reverse=True)
+    deduped = deduplicate(sorted_news)
+    print(f"🔄 去重后剩 {len(deduped)} 条", file=sys.stderr)
+    
+    return deduped[:CONFIG['NEWS_COUNT']]
+
+
 if __name__ == "__main__":
-    # 获取新闻
+    # 1. 获取新闻
     news_list = fetch_news()
     
-    # 输出 JSON 格式，供 OpenClaw 读取
-    print("\n" + "="*50)
-    print("JSON_OUTPUT_START")
-    print(json.dumps(news_list, ensure_ascii=False, indent=2))
-    print("JSON_OUTPUT_END")
-    print("="*50)
-    
-    # 保存到文件（可选，用于调试）
+    # 2. 保存到 JSON 文件
     output_file = "/root/.openclaw/workspace/ai_news_raw.json"
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(news_list, f, ensure_ascii=False, indent=2)
+    print(f"📁 已保存到：{output_file}", file=sys.stderr)
     
-    print(f"\n📁 已保存到：{output_file}")
-    print(f"📰 共 {len(news_list)} 条新闻")
+    # 3. 输出统计（JSON 格式，供 OpenClaw 读取）
+    stats = {
+        "status": "success",
+        "news_count": len(news_list),
+        "output_file": output_file,
+        "sources": {},
+        "message": "新闻数据已准备完成，请读取 JSON 文件并生成早报"
+    }
     
-    # 统计来源
-    sources = {}
+    # 来源统计
     for news in news_list:
         src = news['source']
-        sources[src] = sources.get(src, 0) + 1
-    print(f"📊 来源统计：{sources}")
+        stats["sources"][src] = stats["sources"].get(src, 0) + 1
     
-    print("\n💡 下一步：请 OpenClaw 总结这些新闻并发送到飞书")
+    # 输出 JSON 统计（stdout 供 OpenClaw 读取）
+    print("\n" + json.dumps(stats, ensure_ascii=False, indent=2))
+    
+    # 4. 输出来源列表（stderr 供人类阅读）
+    print(f"\n📊 来源统计：{stats['sources']}", file=sys.stderr)
+    print("\n✅ 数据准备完成，请 LLM 读取 JSON 生成早报并推送", file=sys.stderr)
