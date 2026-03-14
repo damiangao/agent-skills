@@ -1,97 +1,136 @@
 # AI 新闻早报 Skill
 
-自动搜索 AI 行业新闻，使用 LLM 生成精选早报，支持多渠道推送。
+## 功能
 
-## 📋 功能
+每日自动推送 AI 新闻早报给用户：
+1. 搜索 AI 新闻（9 个关键词）
+2. 按媒体权威性排序、去重
+3. 生成早报（10 条新闻 + 洞察 + 趋势分析）
+4. 发送给用户（飞书/钉钉等渠道）
 
-- 🔍 使用 baidu-search 搜索 AI 相关新闻
-- 🎯 按媒体权威性智能排序（专业 AI 媒体 > 官方媒体 > 科技媒体）
-- 🤖 使用 LLM 自动生成新闻摘要和洞察
-- 📤 支持飞书、QQ、微信等平台推送
-- ⏰ 支持 cron 定时任务
+## 最佳实践
 
-## 🚀 使用方式
+### 1. Cron Job 定时推送（推荐）
 
-### 手动运行
+**配置**（`~/.openclaw/cron/jobs.json`）：
+
+```json
+{
+  "name": "AI 新闻早报",
+  "enabled": true,
+  "schedule": {"kind": "cron", "expr": "0 9 * * *", "tz": "Asia/Shanghai"},
+  "payload": {
+    "message": "【每日自动调用】请执行 AI 新闻早报 Skill：\n\n1. 运行脚本：python3 generate_report.py\n2. 读取 JSON：cat ai_news_raw.json\n3. 生成早报：按模板生成\n4. 发送给用户：openclaw message send --channel feishu --target user:YOUR_USER_ID --message \"早报内容\""
+  },
+  "delivery": {"mode": "announce", "channel": "feishu", "target": "user:YOUR_USER_ID"}
+}
+```
+
+**说明**：
+- `payload.message`: 必须明确使用 `openclaw message send` 命令（isolated session 需要）
+- `delivery`: 备用配置（主会话时有用）
+- `YOUR_USER_ID`: 替换为你的用户 ID（如 `ou_xxxxxxxxxxxx`）
+
+**注意**：Cron Job 使用 isolated session，`delivery` 配置可能不生效，必须在 `payload.message` 中明确使用 `message` 工具。
+
+### 2. 单次执行
 
 ```bash
-cd /root/.openclaw/workspace/skills/ai-morning-report/scripts
+# Step 1: 运行脚本
 python3 generate_report.py
+
+# Step 2: 读取 JSON 并生成早报（LLM）
+# 读取 ai_news_raw.json，按模板生成早报
+
+# Step 3: 发送给用户
+# 通过可用渠道（飞书/钉钉等）发送早报
 ```
 
-### 定时任务（推荐）
 
-```bash
-# 每天早上 9 点（北京时间）自动生成
-openclaw cron add --name "AI 新闻早报" \
-  --schedule "0 9 * * *" \
-  --tz "Asia/Shanghai" \
-  --command "python3 /root/.openclaw/workspace/skills/ai-morning-report/scripts/generate_report.py"
+
+## LLM 生成模板
+
+```
+📰 今日 AI 新闻早报（{日期}）
+
+---
+
+⭐⭐⭐⭐⭐ | [标题]({URL})
+**📝 简述**：{80-100 字总结}
+**💡 我的理解**：{1-2 句洞察}
+**📰 来源**：{媒体} | {日期}
+
+---
+
+（重复 10 条）
+
+---
+
+💡 我的观察：
+
+1. **趋势 1**：{分析}
+2. **趋势 2**：{分析}
+3. **趋势 3**：{分析}
+4. **趋势 4**：{分析}
+
+---
+
+*每天早上 9 点自动推送*
 ```
 
-## ⚙️ 配置
+## 配置
 
-### 环境变量
+### 关键词
 
-```bash
-# LLM 配置（必填）
-export LLM_API_URL="https://your-api-endpoint.com/v1/messages"
-export LLM_API_KEY="your-api-key"
-export LLM_MODEL="MiniMax-M2.5"
-
-# 推送配置（可选，默认使用当前会话渠道）
-export DELIVERY_CHANNEL="feishu"
-export DELIVERY_TARGET="user:ou_xxx"
+编辑 `generate_report.py`:
+```python
+"TOPIC_QUERIES": ["AI 大模型", "人工智能 自动驾驶", "AI 智能体 Agent", "人形机器人", "OpenAI 谷歌 英伟达"]
 ```
 
-### 搜索关键词
-
-编辑 `generate_report.py` 中的 `CONFIG["QUERIES"]`：
+### 媒体权重
 
 ```python
-"QUERIES": [
-    "AI 大模型",
-    "人工智能 自动驾驶",
-    "AI 智能体 Agent",
-    "人形机器人",
-    "OpenAI 谷歌 英伟达",
-]
+"MEDIA_WEIGHTS": {
+    100: ['机器之心', '新智元', '量子位'],
+    80: ['新华社', '人民日报', '央视新闻'],
+    60: ['36 氪', '钛媒体', '虎嗅'],
+}
 ```
 
-### 媒体优先级
+## 输出
 
-编辑 `search_news.py` 中的 `CONFIG["MEDIA_CATEGORIES"]`，支持自定义媒体分类和权重。
+### JSON
 
-## 📝 输出格式
-
-```
-📰 今日 AI 新闻早报（3 月 8 日）
-📰 早报字数：约 1500 字 | ⏱️ 预估阅读时间：5 分钟
-
----
-
-⭐⭐⭐⭐⭐ | [标题](链接)
-简述：xxx
-我的理解：xxx
-来源：xxx | 日期
-
----
+```json
+[{
+  "title": "标题",
+  "content": "内容",
+  "url": "链接",
+  "date": "2026-03-14",
+  "source": "机器之心",
+  "weight": 100
+}]
 ```
 
-## 🔧 依赖
+### 统计
 
-- Python 3.8+
-- baidu-search skill
-- requests 库
+```json
+{
+  "status": "success",
+  "news_count": 50,
+  "sources": {"机器之心": 15, "新智元": 8}
+}
+```
 
-## 📁 文件说明
+## 调试
 
-- `scripts/generate_report.py` - 早报生成主脚本
-- `scripts/search_news.py` - 新闻搜索、去重、排序
-- `README.md` - 详细文档
+```bash
+# 运行
+python3 generate_report.py
 
-## 💡 提示
+# 查看
+cat ai_news_raw.json | head -50
 
-- 早报会自动过滤广告内容和旧闻（仅保留 3 天内）
-- 支持多个推送渠道，可自定义
-- 建议搭配 cron 使用，实现自动化
+# 测试 Cron
+openclaw cron run "AI 新闻早报"
+```
